@@ -160,8 +160,6 @@ async def update_item(
 
     updated_doc = col.find_one({"_id": ObjectId(item_id)})
     return obj_to_dict(updated_doc)
-s
-
 
 # -----------------------------
 # DELETE ITEM
