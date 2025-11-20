@@ -2,9 +2,11 @@
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from typing import Optional
 from pymongo import MongoClient
-from dotenv import load_dotenv
 from bson import ObjectId
+from dotenv import load_dotenv
 import os
 import shutil
 
@@ -13,17 +15,16 @@ import shutil
 # -----------------------------
 app = FastAPI(title="FastAPI + MongoDB")
 
-# STATIC FOLDER (RENDER SAFE)
-STATIC_FOLDER = "static/images"
-os.makedirs(STATIC_FOLDER, exist_ok=True)
+# Static folder (Render safe)
+STATIC_DIR = "static/images"
+os.makedirs(STATIC_DIR, exist_ok=True)
 
-# STATIC MOUNT
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 load_dotenv()
 
 # -----------------------------
-# MONGODB CONNECTION
+# MONGODB
 # -----------------------------
 MONGODB_URI = os.getenv(
     "MONGODB_URI",
@@ -40,7 +41,7 @@ db = client["hoteldb"]
 col = db["items"]
 
 # -----------------------------
-# HELPER
+# HELPERS
 # -----------------------------
 def obj_to_dict(doc):
     doc["id"] = str(doc["_id"])
@@ -49,34 +50,44 @@ def obj_to_dict(doc):
 
 
 # -----------------------------
-# CREATE ITEM (FORM-DATA + IMAGE UPLOAD)
+# TEST ROUTES
+# -----------------------------
+@app.get("/")
+def home():
+    return {"message": "API live — main.py working!"}
+
+
+@app.get("/hotel-db")
+def hotel_test():
+    d = col.find_one()
+    if d:
+        return obj_to_dict(d)
+    return {"status": "empty"}
+
+
+# -----------------------------
+# CREATE ITEM (WITH IMAGE)
 # -----------------------------
 @app.post("/items")
 async def create_item(
     name: str = Form(...),
     age: int = Form(...),
     city: str = Form(...),
-    image: UploadFile | None = File(None)
+    image: UploadFile = File(None)
 ):
 
     image_url = None
 
-    if image:
-        # File save path
-        file_location = f"{STATIC_FOLDER}/{image.filename}"
+    if image is not None:
+        filename = image.filename.replace(" ", "_")
+        file_path = f"static/images/{filename}"
 
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
+        with open(file_path, "wb") as f:
+            f.write(await image.read())  # BINARY ONLY
 
-        # Render URL (IMPORTANT)
-        render_url = os.getenv(
-            "RENDER_URL",
-            "https://fastapi-mongodb-app.onrender.com"
-        )
+        # PUBLIC URL
+        image_url = f"https://fastapi-mongodb-app.onrender.com/static/images/{filename}"
 
-        image_url = f"{render_url}/static/images/{image.filename}"
-
-    # Create DB document
     item = {
         "name": name,
         "age": age,
@@ -86,13 +97,74 @@ async def create_item(
 
     result = col.insert_one(item)
     saved = col.find_one({"_id": result.inserted_id})
-
     return obj_to_dict(saved)
 
 
 # -----------------------------
-# TEST ROUTE
+# GET ONE
 # -----------------------------
-@app.get("/")
-async def home():
-    return {"message": "FastAPI Render Working!"}
+@app.get("/items/{item_id}")
+# READ ALL ITEMS
+@app.get("/items")
+def get_all_items():
+    items = []
+    for doc in col.find():
+        items.append(obj_to_dict(doc))
+    return items
+
+
+
+# -----------------------------
+# UPDATE ITEM
+# -----------------------------
+@app.patch("/items/{item_id}")
+async def update_item(
+    item_id: str,
+    name: str = Form(None),
+    age: int = Form(None),
+    city: str = Form(None),
+    image: UploadFile = File(None)
+):
+
+    update = {}
+
+    if name:
+        update["name"] = name
+    if age is not None:
+        update["age"] = age
+    if city:
+        update["city"] = city
+
+    if image:
+        filename = image.filename.replace(" ", "_")
+        file_path = f"static/images/{filename}"
+
+        with open(file_path, "wb") as f:
+            f.write(await image.read())
+
+        update["image"] = f"https://fastapi-mongodb-app.onrender.com/static/images/{filename}"
+
+    if not update:
+        raise HTTPException(400, "No data to update")
+
+    try:
+        col.update_one({"_id": ObjectId(item_id)}, {"$set": update})
+    except:
+        raise HTTPException(400, "Invalid ID")
+
+    updated = col.find_one({"_id": ObjectId(item_id)})
+    return obj_to_dict(updated)
+
+
+# -----------------------------
+# DELETE ITEM
+# -----------------------------
+@app.delete("/items/{item_id}")
+def delete_item(item_id: str):
+    try:
+        doc = col.find_one_and_delete({"_id": ObjectId(item_id)})
+        if not doc:
+            raise HTTPException(404, "Item not found")
+        return obj_to_dict(doc)
+    except:
+        raise HTTPException(400, "Invalid ID")
