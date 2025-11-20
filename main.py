@@ -125,35 +125,42 @@ async def update_item(
     city: str = Form(None),
     image: UploadFile = File(None)
 ):
-
-    update = {}
+    update_data = {}
 
     if name:
-        update["name"] = name
+        update_data["name"] = name
     if age is not None:
-        update["age"] = age
+        update_data["age"] = age
     if city:
-        update["city"] = city
+        update_data["city"] = city
 
+    # image upload
     if image:
+        save_path = "static/images"
+        os.makedirs(save_path, exist_ok=True)
+
         filename = image.filename.replace(" ", "_")
-        file_path = f"static/images/{filename}"
+        file_path = os.path.join(save_path, filename)
 
-        with open(file_path, "wb") as f:
-            f.write(await image.read())
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
 
-        update["image"] = f"https://fastapi-mongodb-app.onrender.com/static/images/{filename}"
+        update_data["image"] = f"https://fastapi-mongodb-app.onrender.com/static/images/{filename}"
 
-    if not update:
-        raise HTTPException(400, "No data to update")
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
 
     try:
-        col.update_one({"_id": ObjectId(item_id)}, {"$set": update})
+        result = col.update_one({"_id": ObjectId(item_id)}, {"$set": update_data})
     except:
-        raise HTTPException(400, "Invalid ID")
+        raise HTTPException(status_code=400, detail="Invalid ID format")
 
-    updated = col.find_one({"_id": ObjectId(item_id)})
-    return obj_to_dict(updated)
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    updated_doc = col.find_one({"_id": ObjectId(item_id)})
+    return obj_to_dict(updated_doc)
+s
 
 
 # -----------------------------
