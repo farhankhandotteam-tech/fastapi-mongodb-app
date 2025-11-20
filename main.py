@@ -1,142 +1,98 @@
-# api.py
-
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Optional, List
-from pymongo import MongoClient
-from bson import ObjectId
+# main.py
+from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pymongo import MongoClient
 from dotenv import load_dotenv
+from bson import ObjectId
 import os
+import shutil
 
-# -------- Load Environment Variables --------
+# -----------------------------
+# BASIC SETUP
+# -----------------------------
+app = FastAPI(title="FastAPI + MongoDB")
+
+# STATIC FOLDER (RENDER SAFE)
+STATIC_FOLDER = "static/images"
+os.makedirs(STATIC_FOLDER, exist_ok=True)
+
+# STATIC MOUNT
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 load_dotenv()
 
-# -------- MongoDB Connection (SSL FIX) --------
+# -----------------------------
+# MONGODB CONNECTION
+# -----------------------------
 MONGODB_URI = os.getenv(
     "MONGODB_URI",
-    "mongodb+srv://hotel:hotel@cluster0.qgjxf2y.mongodb.net/hoteldb?retryWrites=true&w=majority"
+    "mongodb+srv://hotel:hotel@cluster0.qgjxf2y.mongodb.net/hoteldb"
 )
 
 client = MongoClient(
     MONGODB_URI,
     tls=True,
-    tlsAllowInvalidCertificates=True  # IMPORTANT SSL FIX
+    tlsAllowInvalidCertificates=True
 )
 
-DB_NAME = os.getenv("DB_NAME", "hoteldb")
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "items")
+db = client["hoteldb"]
+col = db["items"]
 
-db = client[DB_NAME]
-col = db[COLLECTION_NAME]
-
-# -------- FastAPI Setup --------
-app = FastAPI(title="FastAPI + MongoDB Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],    
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -------- Helper: Convert ObjectId --------
+# -----------------------------
+# HELPER
+# -----------------------------
 def obj_to_dict(doc):
-    if not doc:
-        return None
     doc["id"] = str(doc["_id"])
-    doc.pop("_id", None)
+    doc.pop("_id")
     return doc
 
-# -------- Models --------
-class ItemModel(BaseModel):
-    name: str = Field(..., example="Alice")
-    age: Optional[int] = Field(None, example=25)
-    city: Optional[str] = Field(None, example="Delhi")
 
-class UpdateItemModel(BaseModel):
-    name: Optional[str]= None
-    age: Optional[int]= None
-    city: Optional[str]= None
-    
-
-# -------- Routes --------
-@app.get("/hotel-db")
-def hotel_db():
-    data = collection.find_one()  # first document
-    if data:
-        return {"status": "connected", "data": data}
-    else:
-        return {"status": "connected but empty"}
-
-@app.get("/")
-def read_root():
-    return {"message": "API is live "}
-
-
-# CREATE
+# -----------------------------
+# CREATE ITEM (FORM-DATA + IMAGE UPLOAD)
+# -----------------------------
 @app.post("/items")
-def create_item(item: ItemModel):
-    data = item.dict()
-    result = col.insert_one(data)
-    new_doc = col.find_one({"_id": result.inserted_id})
-    return obj_to_dict(new_doc)
+async def create_item(
+    name: str = Form(...),
+    age: int = Form(...),
+    city: str = Form(...),
+    image: UploadFile | None = File(None)
+):
+
+    image_url = None
+
+    if image:
+        # File save path
+        file_location = f"{STATIC_FOLDER}/{image.filename}"
+
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+
+        # Render URL (IMPORTANT)
+        render_url = os.getenv(
+            "RENDER_URL",
+            "https://fastapi-mongodb-app.onrender.com"
+        )
+
+        image_url = f"{render_url}/static/images/{image.filename}"
+
+    # Create DB document
+    item = {
+        "name": name,
+        "age": age,
+        "city": city,
+        "image": image_url
+    }
+
+    result = col.insert_one(item)
+    saved = col.find_one({"_id": result.inserted_id})
+
+    return obj_to_dict(saved)
 
 
-# READ ALL
-@app.get("/items")
-def list_items():
-    docs = col.find()
-    return [obj_to_dict(d) for d in docs]
-
-
-# READ ONE
-@app.get("/items/{item_id}")
-def get_item(item_id: str):
-    try:
-        doc = col.find_one({"_id": ObjectId(item_id)})
-    except:
-        raise HTTPException(400, "Invalid ID format")
-
-    if not doc:
-        raise HTTPException(404, "Item not found")
-
-    return obj_to_dict(doc)
-
-
-
-
-
-# PARTIAL UPDATE (PATCH)
-@app.patch("/items/{item_id}")
-def update_item(item_id: str, item: UpdateItemModel):
-    update_data = {k: v for k, v in item.dict().items() if v is not None}
-
-    if not update_data:   # <-- Ye line
-        raise HTTPException(400, "No data to update")
-
-    try:
-        res = col.update_one({"_id": ObjectId(item_id)}, {"$set": update_data})
-    except:
-        raise HTTPException(400, "Invalid ID format")
-    
-    if res.matched_count == 0:
-        raise HTTPException(404, "Item not found")
-
-    return obj_to_dict(col.find_one({"_id": ObjectId(item_id)}))
-
-
-
-# DELETE
-@app.delete("/items/{item_id}")
-def delete_item(item_id: str):
-    try:
-        doc = col.find_one_and_delete({"_id": ObjectId(item_id)})
-    except:
-        raise HTTPException(400, "Invalid ID format")
-
-    if not doc:
-        raise HTTPException(404, "Item not found")
-
-    return obj_to_dict(doc)
+# -----------------------------
+# TEST ROUTE
+# -----------------------------
+@app.get("/")
+async def home():
+    return {"message": "FastAPI Render Working!"}
