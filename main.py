@@ -104,6 +104,12 @@ async def create_item(
 # GET ONE
 # -----------------------------
 @app.get("/items/{item_id}")
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    doc = col.find_one({"_id": ObjectId(item_id)})
+    if not doc:
+        raise HTTPException(404, "Item not found")
+    return obj_to_dict(doc)
 # READ ALL ITEMS
 @app.get("/items")
 def get_all_items():
