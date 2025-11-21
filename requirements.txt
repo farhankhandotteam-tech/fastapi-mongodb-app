@@ -1,7 +1,8 @@
 fastapi
-uvicorn[standard]
-gunicorn
+uvicorn
 pymongo
 python-dotenv
+python-jose
+passlib
+bcrypt
 python-multipart
-
