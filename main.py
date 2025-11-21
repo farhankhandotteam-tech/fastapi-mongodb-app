@@ -22,7 +22,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 load_dotenv()
 
 # Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
@@ -36,11 +37,15 @@ def create_access_token(data: dict, expires_delta=None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def hash_password(password: str):
-    return pwd_context.hash(password[:72])
+def hash_password(password):
+    password = str(password)  # convert number → string
+    return pwd_context.hash(password)
 
-def verify_password(password: str, hashed):
-    return pwd_context.verify(password, hashed)
+
+def verify_password(plain, hashed):
+    plain = str(plain)
+    return pwd_context.verify(plain, hashed)
+
 
 # ---------------- MongoDB ----------------
 MONGODB_URI = os.getenv(
