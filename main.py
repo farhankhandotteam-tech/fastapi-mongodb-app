@@ -88,8 +88,11 @@ def obj_to_dict(doc):
     doc["id"] = str(doc["_id"])
     doc.pop("_id")
     return doc
+def hash_password(password: str):
+    return pwd_context.hash(password[:72])   # <-- yahan truncate fix
 
-
+def verify_password(password: str, hashed):
+    return pwd_context.verify(password, hashed)
 # ---------------- USER AUTH ----------------
 
 @app.post("/register")
