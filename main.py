@@ -95,17 +95,24 @@ def verify_password(password: str, hashed):
     return pwd_context.verify(password, hashed)
 # ---------------- USER AUTH ----------------
 
+from pydantic import BaseModel
+
+class UserRegister(BaseModel):
+    username: str
+    password: str
+
 @app.post("/register")
-def register(username: str = Form(...), password: str = Form(...)):
-    if user_col.find_one({"username": username}):
+def register(user: UserRegister):
+    if user_col.find_one({"username": user.username}):
         raise HTTPException(400, "Username already exists")
 
     user_col.insert_one({
-        "username": username,
-        "password": hash_password(password)
+        "username": user.username,
+        "password": hash_password(user.password)
     })
 
     return {"message": "User registered successfully"}
+
 
 
 @app.post("/login")
